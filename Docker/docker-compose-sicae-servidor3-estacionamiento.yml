@@ -1,0 +1,44 @@
+services:
+  db-estacionamiento:
+    image: mysql:8.0
+    container_name: sicae-db-estacionamiento
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sicaeestacionamiento
+    ports:
+      - "3308:3306"
+    volumes:
+      - sicae_estacionamiento_data:/var/lib/mysql
+      - ../BD/MySQL/sicaeestacionamiento.sql:/docker-entrypoint-initdb.d/01-sicaeestacionamiento.sql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sicae-servidor3
+
+  sicae-estacionamiento:
+    build: ../Microservicios/sicae-estacionamiento
+    container_name: sicae-estacionamiento
+    depends_on:
+      db-estacionamiento:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://db-estacionamiento:3306/sicaeestacionamiento?serverTimezone=America/Mexico_City
+      DB_USER: root
+      DB_PASSWORD: root
+      JWT_SECRET: clave-sicae-proyecto-final
+      USUARIOS_URL: http://host.docker.internal:8081
+      VEHICULOS_URL: http://host.docker.internal:8082
+    ports:
+      - "8083:8083"
+    networks:
+      - sicae-servidor3
+
+volumes:
+  sicae_estacionamiento_data:
+
+networks:
+  sicae-servidor3:
+    driver: bridge

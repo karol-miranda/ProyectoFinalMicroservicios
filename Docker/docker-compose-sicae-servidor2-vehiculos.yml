@@ -1,0 +1,42 @@
+services:
+  db-vehiculos:
+    image: mysql:8.0
+    container_name: sicae-db-vehiculos
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sicaevehiculo
+    ports:
+      - "3307:3306"
+    volumes:
+      - sicae_vehiculos_data:/var/lib/mysql
+      - ../BD/MySQL/sicaevehiculo.sql:/docker-entrypoint-initdb.d/01-sicaevehiculo.sql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sicae-servidor2
+
+  sicae-vehiculos:
+    build: ../Microservicios/sicae-vehiculos
+    container_name: sicae-vehiculos
+    depends_on:
+      db-vehiculos:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://db-vehiculos:3306/sicaevehiculo?serverTimezone=America/Mexico_City
+      DB_USER: root
+      DB_PASSWORD: root
+      JWT_SECRET: clave-sicae-proyecto-final
+    ports:
+      - "8082:8082"
+    networks:
+      - sicae-servidor2
+
+volumes:
+  sicae_vehiculos_data:
+
+networks:
+  sicae-servidor2:
+    driver: bridge

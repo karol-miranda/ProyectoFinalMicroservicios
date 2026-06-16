@@ -1,0 +1,43 @@
+services:
+  db-usuarios:
+    image: postgres:17
+    container_name: sicae-db-usuarios
+    environment:
+      POSTGRES_DB: sicaeUsuario
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - sicae_usuarios_data:/var/lib/postgresql/data
+      - ../BD/Postgre SQL/sicaeUsuario.sql:/docker-entrypoint-initdb.d/01-sicaeUsuario.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sicaeUsuario"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sicae-servidor1
+
+  sicae-usuarios:
+    build: ../Microservicios/sicae-usuarios
+    container_name: sicae-usuarios
+    depends_on:
+      db-usuarios:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db-usuarios:5432/sicaeUsuario
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: clave-sicae-proyecto-final
+    ports:
+      - "8081:8081"
+    networks:
+      - sicae-servidor1
+
+volumes:
+  sicae_usuarios_data:
+
+networks:
+  sicae-servidor1:
+    driver: bridge
