@@ -6,6 +6,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import uv.listi.sicae_estacionamiento.dto.EntradaRequest;
 import uv.listi.sicae_estacionamiento.dto.MensajeResponse;
@@ -18,6 +19,9 @@ import uv.listi.sicae_estacionamiento.model.Movimiento;
 import uv.listi.sicae_estacionamiento.repository.EstacionamientoRepository;
 import uv.listi.sicae_estacionamiento.security.JwtUtil;
 
+import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Service
@@ -44,9 +48,9 @@ public class EstacionamientoService {
 
     public Object registrarEntrada(String authorization, EntradaRequest request) {
         jwtUtil.validar(authorization);
-        if (request == null || vacio(request.claveUsuario()) || vacio(request.placa()) ||
-                request.idEspacio() == null || request.tarifaHora() == null) {
-            return new MensajeResponse(false, "Faltan datos obligatorios");
+        String error = validarEntrada(request);
+        if (error != null) {
+            return new MensajeResponse(false, error);
         }
 
         ValidacionUsuarioResponse usuario = validarUsuario(request.claveUsuario());
@@ -69,7 +73,11 @@ public class EstacionamientoService {
         if (repository.contarMovimientoAbierto(vehiculo.idVehiculo()) > 0) {
             return new MensajeResponse(false, "El vehiculo ya tiene una entrada activa");
         }
-        if (contarVehiculosDentro(authorization, usuario.idUsuario()) >= 2) {
+        int vehiculosDentro = contarVehiculosDentro(authorization, usuario.idUsuario());
+        if (vehiculosDentro < 0) {
+            return new MensajeResponse(false, "No se pudo consultar la lista de vehiculos del usuario");
+        }
+        if (vehiculosDentro >= 2) {
             return new MensajeResponse(false, "El usuario ya tiene 2 vehiculos dentro del estacionamiento");
         }
 
@@ -84,8 +92,9 @@ public class EstacionamientoService {
 
     public Object registrarSalida(String authorization, SalidaRequest request) {
         jwtUtil.validar(authorization);
-        if (request == null || vacio(request.claveUsuario()) || vacio(request.placa())) {
-            return new MensajeResponse(false, "Faltan datos obligatorios");
+        String error = validarSalida(request);
+        if (error != null) {
+            return new MensajeResponse(false, error);
         }
         ValidacionUsuarioResponse usuario = validarUsuario(request.claveUsuario());
         if (usuario == null || !usuario.activo()) {
@@ -105,26 +114,41 @@ public class EstacionamientoService {
     }
 
     private ValidacionUsuarioResponse validarUsuario(String claveUsuario) {
-        String url = usuariosUrl + "/api/usuarios/validar/" + claveUsuario;
-        return restTemplate.getForObject(url, ValidacionUsuarioResponse.class);
+        try {
+            String clave = URLEncoder.encode(claveUsuario, StandardCharsets.UTF_8);
+            String url = usuariosUrl + "/api/usuarios/validar/" + clave;
+            return restTemplate.getForObject(url, ValidacionUsuarioResponse.class);
+        } catch (RestClientException e) {
+            return null;
+        }
     }
 
     private ValidacionVehiculoResponse validarVehiculo(String placa, Integer idUsuario) {
-        String url = vehiculosUrl + "/api/vehiculos/validar?placa=" + placa + "&idUsuario=" + idUsuario;
-        return restTemplate.getForObject(url, ValidacionVehiculoResponse.class);
+        try {
+            String placaUrl = URLEncoder.encode(placa.toUpperCase(), StandardCharsets.UTF_8);
+            String url = vehiculosUrl + "/api/vehiculos/validar?placa=" + placaUrl + "&idUsuario=" + idUsuario;
+            return restTemplate.getForObject(url, ValidacionVehiculoResponse.class);
+        } catch (RestClientException e) {
+            return null;
+        }
     }
 
     private int contarVehiculosDentro(String authorization, Integer idUsuario) {
-        String url = vehiculosUrl + "/api/vehiculos/usuario/" + idUsuario;
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Authorization", authorization);
-        ResponseEntity<VehiculoClienteResponse[]> response = restTemplate.exchange(
-                url,
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                VehiculoClienteResponse[].class
-        );
-        VehiculoClienteResponse[] vehiculos = response.getBody();
+        VehiculoClienteResponse[] vehiculos;
+        try {
+            String url = vehiculosUrl + "/api/vehiculos/usuario/" + idUsuario;
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", authorization);
+            ResponseEntity<VehiculoClienteResponse[]> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    VehiculoClienteResponse[].class
+            );
+            vehiculos = response.getBody();
+        } catch (RestClientException e) {
+            return -1;
+        }
         if (vehiculos == null) {
             return 0;
         }
@@ -135,6 +159,52 @@ public class EstacionamientoService {
             }
         }
         return total;
+    }
+
+    private String validarEntrada(EntradaRequest request) {
+        if (request == null) {
+            return "La solicitud de entrada viene vacia";
+        }
+        String faltantes = camposFaltantesEntrada(request);
+        if (!faltantes.isEmpty()) {
+            return "Faltan datos obligatorios: " + faltantes;
+        }
+        if (request.tarifaHora().compareTo(BigDecimal.ZERO) <= 0) {
+            return "La tarifaHora debe ser mayor a cero";
+        }
+        return null;
+    }
+
+    private String validarSalida(SalidaRequest request) {
+        if (request == null) {
+            return "La solicitud de salida viene vacia";
+        }
+        StringBuilder campos = new StringBuilder();
+        agregarCampo(campos, vacio(request.claveUsuario()), "claveUsuario");
+        agregarCampo(campos, vacio(request.placa()), "placa");
+        if (campos.length() > 0) {
+            return "Faltan datos obligatorios: " + campos;
+        }
+        return null;
+    }
+
+    private String camposFaltantesEntrada(EntradaRequest request) {
+        StringBuilder campos = new StringBuilder();
+        agregarCampo(campos, vacio(request.claveUsuario()), "claveUsuario");
+        agregarCampo(campos, vacio(request.placa()), "placa");
+        agregarCampo(campos, request.idEspacio() == null, "idEspacio");
+        agregarCampo(campos, request.tarifaHora() == null, "tarifaHora");
+        return campos.toString();
+    }
+
+    private void agregarCampo(StringBuilder campos, boolean falta, String nombre) {
+        if (!falta) {
+            return;
+        }
+        if (campos.length() > 0) {
+            campos.append(", ");
+        }
+        campos.append(nombre);
     }
 
     private boolean vacio(String valor) {

@@ -32,7 +32,7 @@ public class VehiculoService {
         if (error != null) {
             return new MensajeResponse(false, error);
         }
-        if (repository.buscarPorPlaca(request.placa()) != null) {
+        if (repository.buscarPorPlaca(request.placa().toUpperCase()) != null) {
             return new MensajeResponse(false, "Ya existe un vehiculo con esa placa");
         }
         if (repository.contarActivosPorUsuario(request.idUsuario()) >= 4) {
@@ -58,12 +58,15 @@ public class VehiculoService {
         if (!actual.getIdUsuario().equals(idUsuarioToken) && ((Number) token.get("idRol")).intValue() != 1) {
             return new MensajeResponse(false, "Solo se puede editar un vehiculo propio");
         }
-        if (repository.contarPlacaEnOtroVehiculo(request.placa(), idVehiculo) > 0) {
+        if (repository.contarPlacaEnOtroVehiculo(request.placa().toUpperCase(), idVehiculo) > 0) {
             return new MensajeResponse(false, "Ya existe otro vehiculo con esa placa");
         }
         Vehiculo vehiculo = mapear(request);
         vehiculo.setIdVehiculo(idVehiculo);
-        repository.actualizar(vehiculo);
+        int filas = repository.actualizar(vehiculo);
+        if (filas == 0) {
+            return new MensajeResponse(false, "No se actualizo el vehiculo porque el idUsuario enviado no coincide");
+        }
         return new MensajeResponse(true, "Vehiculo actualizado correctamente");
     }
 
@@ -82,7 +85,10 @@ public class VehiculoService {
     }
 
     public ValidacionVehiculoResponse validar(String placa, Integer idUsuario) {
-        Vehiculo vehiculo = repository.buscarPorPlaca(placa);
+        if (vacio(placa) || idUsuario == null) {
+            return new ValidacionVehiculoResponse(false, null, idUsuario, placa, "La placa y el idUsuario son obligatorios");
+        }
+        Vehiculo vehiculo = repository.buscarPorPlaca(placa.toUpperCase());
         if (vehiculo == null) {
             return new ValidacionVehiculoResponse(false, null, idUsuario, placa, "Vehiculo no encontrado");
         }
@@ -107,14 +113,40 @@ public class VehiculoService {
     }
 
     private String validarRequest(VehiculoRequest request) {
-        if (request == null || request.idUsuario() == null || request.idModelo() == null ||
-                vacio(request.placa()) || vacio(request.color()) || request.anio() == null) {
-            return "Faltan datos obligatorios";
+        if (request == null) {
+            return "La solicitud de vehiculo viene vacia";
+        }
+        String faltantes = camposFaltantes(request);
+        if (!faltantes.isEmpty()) {
+            return "Faltan datos obligatorios: " + faltantes;
         }
         if (request.placa().length() > 7) {
             return "La placa no puede tener mas de 7 caracteres";
         }
+        if (request.anio() < 1900) {
+            return "El anio del vehiculo no es valido";
+        }
         return null;
+    }
+
+    private String camposFaltantes(VehiculoRequest request) {
+        StringBuilder campos = new StringBuilder();
+        agregarCampo(campos, request.idUsuario() == null, "idUsuario");
+        agregarCampo(campos, request.idModelo() == null, "idModelo");
+        agregarCampo(campos, vacio(request.placa()), "placa");
+        agregarCampo(campos, vacio(request.color()), "color");
+        agregarCampo(campos, request.anio() == null, "anio");
+        return campos.toString();
+    }
+
+    private void agregarCampo(StringBuilder campos, boolean falta, String nombre) {
+        if (!falta) {
+            return;
+        }
+        if (campos.length() > 0) {
+            campos.append(", ");
+        }
+        campos.append(nombre);
     }
 
     private String generarClaveVehiculo(String placa) {

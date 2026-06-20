@@ -26,12 +26,18 @@ public class UsuarioService {
     }
 
     public LoginResponse login(LoginRequest request) {
+        if (request == null) {
+            return new LoginResponse(false, "La solicitud de login viene vacia", null, null, null, null, null, null, null, null, null);
+        }
         if (vacio(request.usuario()) || vacio(request.password())) {
             return new LoginResponse(false, "Usuario y password son obligatorios", null, null, null, null, null, null, null, null, null);
         }
         Usuario usuario = repository.buscarPorUsername(request.usuario());
-        if (usuario == null || !"1".equals(usuario.getEstatus())) {
-            return new LoginResponse(false, "El usuario no existe o esta inactivo", null, null, null, null, null, null, null, null, null);
+        if (usuario == null) {
+            return new LoginResponse(false, "No existe un usuario registrado con ese username", null, null, null, null, null, null, null, null, null);
+        }
+        if (!"1".equals(usuario.getEstatus())) {
+            return new LoginResponse(false, "El usuario existe, pero esta inactivo", null, null, null, null, null, null, null, null, null);
         }
         if (!encoder.matches(request.password(), usuario.getPassword())) {
             return new LoginResponse(false, "Password incorrecto", null, null, null, null, null, null, null, null, null);
@@ -51,8 +57,11 @@ public class UsuarioService {
         if (error != null) {
             return new MensajeResponse(false, error);
         }
-        if (repository.contarPorEmail(request.email()) > 0 || repository.contarPorUsername(request.username()) > 0) {
-            return new MensajeResponse(false, "Ya existe un usuario con ese correo o username");
+        if (repository.contarPorEmail(request.email()) > 0) {
+            return new MensajeResponse(false, "Ya existe un usuario registrado con ese correo");
+        }
+        if (repository.contarPorUsername(request.username()) > 0) {
+            return new MensajeResponse(false, "Ya existe un usuario registrado con ese username");
         }
         Usuario usuario = mapear(request);
         usuario.setPassword(encoder.encode(request.password()));
@@ -129,19 +138,41 @@ public class UsuarioService {
     }
 
     private String validarRequest(UsuarioRequest request, boolean validarPassword) {
-        if (request == null || request.idRol() == null || request.idTipoUsuario() == null ||
-                request.idProgramaEducativo() == null || vacio(request.nombre()) ||
-                vacio(request.apellidoPaterno()) || vacio(request.username()) ||
-                vacio(request.email()) || vacio(request.telefono())) {
-            return "Faltan datos obligatorios";
+        if (request == null) {
+            return "La solicitud de usuario viene vacia";
         }
-        if (validarPassword && vacio(request.password())) {
-            return "La password es obligatoria";
+        String faltantes = camposFaltantes(request, validarPassword);
+        if (!faltantes.isEmpty()) {
+            return "Faltan datos obligatorios: " + faltantes;
         }
         if (!request.email().contains("@")) {
             return "El correo no tiene formato valido";
         }
         return null;
+    }
+
+    private String camposFaltantes(UsuarioRequest request, boolean validarPassword) {
+        StringBuilder campos = new StringBuilder();
+        agregarCampo(campos, request.idRol() == null, "idRol");
+        agregarCampo(campos, request.idTipoUsuario() == null, "idTipoUsuario");
+        agregarCampo(campos, request.idProgramaEducativo() == null, "idProgramaEducativo");
+        agregarCampo(campos, vacio(request.nombre()), "nombre");
+        agregarCampo(campos, vacio(request.apellidoPaterno()), "apellidoPaterno");
+        agregarCampo(campos, vacio(request.username()), "username");
+        agregarCampo(campos, vacio(request.email()), "email");
+        agregarCampo(campos, vacio(request.telefono()), "telefono");
+        agregarCampo(campos, validarPassword && vacio(request.password()), "password");
+        return campos.toString();
+    }
+
+    private void agregarCampo(StringBuilder campos, boolean falta, String nombre) {
+        if (!falta) {
+            return;
+        }
+        if (campos.length() > 0) {
+            campos.append(", ");
+        }
+        campos.append(nombre);
     }
 
     private String generarClaveUnica(String nombre, String apellido) {
